@@ -1,0 +1,36 @@
+# Build directories
+build/
+bin/
+obj/
+out/
+
+# IDE files
+.vs/
+*.sln
+*.vcxproj
+*.filters
+*.user
+.idea/
+.vscode/
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.a
+*.lib
+*.pdb
+
+# Dependencies
+# (Submodules are handled by .gitmodules, but we can ignore internal build states)
+deps/*/build/
+deps/*/bin/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+import_log.txt
+export_log.txt
