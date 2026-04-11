@@ -238,14 +238,54 @@ static bool ResolveDDSTexture(
     auto matData = ReadAssetBytes(*matArch, *matAsset);
     if (matData.size() < 100) { log << "  " << meshName << ": mat data too small\n"; return false; }
 
-    uint64_t texID = ReadAddressLE(matData, matData.size() - 100);
-    if (!texID) { log << "  " << meshName << ": texID=0 at mat[size-100]\n"; return false; }
-    log << "  " << meshName << ": texID=" << std::hex << texID << std::dec << "\n";
-
+    size_t texIDOffset = matData.size() - 100;
+    uint64_t texID = ReadAddressLE(matData, texIDOffset);
+    
+    const HoLib::AssetEntry* texAsset = nullptr;
     const HoLib::Archive*    texArch  = nullptr;
-    const HoLib::AssetEntry* texAsset = FindAssetByIDAndType(archives, texID, TEXTURE_TYPE, &texArch);
-    if (!texAsset) { log << "  " << meshName << ": Texture asset not found\n"; return false; }
-    log << "  " << meshName << ": tex=" << texAsset->Name << "\n";
+
+    auto tryResolve = [&](uint64_t id) -> bool {
+        if (!id) return false;
+        texAsset = FindAssetByIDAndType(archives, id, TEXTURE_TYPE, &texArch);
+        return texAsset != nullptr;
+    };
+
+    if (!tryResolve(texID)) {
+        // Try skipping 8 bytes
+        log << "  " << meshName << ": texID 0x" << std::hex << texID << " not resolved, trying skip 8...\n";
+        texIDOffset += 8;
+        texID = ReadAddressLE(matData, texIDOffset);
+        if (!tryResolve(texID)) {
+            log << "  " << meshName << ": NO valid texture found after retry. Assigning random color fallback.\n";
+            out.hasValidTexture = false;
+            // Use a simple hash of the meshName to get a "random" but consistent color
+            uint32_t hash = 0x811c9dc5;
+            for (char c : meshName) { hash ^= (uint8_t)c; hash *= 0x01000193; }
+            out.tint[0] = ((hash >>  0) & 0xFF) / 255.0f;
+            out.tint[1] = ((hash >>  8) & 0xFF) / 255.0f;
+            out.tint[2] = ((hash >> 16) & 0xFF) / 255.0f;
+            return true; 
+        }
+    }
+
+    out.hasValidTexture = true;
+    log << "  " << meshName << ": Resolved tex=" << texAsset->Name << " (ID=" << std::hex << texID << std::dec << ")\n";
+
+    // Read Tint Color (RGB Float32) starting 16 bytes after texID start (skip 8 for ID, 8 for unknown)
+    if (matData.size() >= texIDOffset + 16 + 12) {
+        float r, g, b;
+        std::memcpy(&r, matData.data() + texIDOffset + 16, 4);
+        std::memcpy(&g, matData.data() + texIDOffset + 20, 4);
+        std::memcpy(&b, matData.data() + texIDOffset + 24, 4);
+
+        // Standard 1.0, 1.0, 1.0 (hex 00 00 80 3F) means no tint
+        if (r == 1.0f && g == 1.0f && b == 1.0f) {
+            out.tint[0] = 1.0f; out.tint[1] = 1.0f; out.tint[2] = 1.0f;
+        } else {
+            out.tint[0] = r; out.tint[1] = g; out.tint[2] = b;
+            log << "  " << meshName << ": Applied Tint RGB(" << r << ", " << g << ", " << b << ")\n";
+        }
+    }
 
     auto texData = ReadAssetBytes(*texArch, *texAsset);
     if (texData.size() < 8) { log << "  " << meshName << ": tex data too small\n"; return false; }
@@ -296,14 +336,13 @@ bool ParseStaticGeometry(
     auto normalsBlob = fetchBlob(normalsID);
 
     if (vertsBlob.empty() || facesBlob.empty()) return false;
-
-    out.name     = sgAsset.Name;
+    
     out.vertices = ParseVertices(vertsBlob);
     out.faces    = ParseFaces(facesBlob);
     if (!uvsBlob.empty())     out.uvs     = ParseUVs(uvsBlob);
     if (!normalsBlob.empty()) out.normals  = ParseNormals(normalsBlob);
     
-    ResolveDDSTexture(archives, sgData, BaseName(sgAsset.Name), out, log);
+    ResolveDDSTexture(archives, sgData, out.name, out, log);
 
     return !out.vertices.empty() && !out.faces.empty();
 }
@@ -346,12 +385,51 @@ static void ExportMeshesToGLB(
     };
 
     // Material and Texture tracking for GLTF
-    struct GltfMat { std::string name; std::string pngUri; };
-    std::vector<GltfMat> gltfMats;
+    struct GltfMat { 
+        uint64_t texID; 
+        float r, g, b; 
+        std::string pngUri;
+        int texIndex = -1;
+    };
+    std::vector<GltfMat> materials;
     std::vector<int> meshToMat(meshes.size(), -1);
 
     for (size_t mi = 0; mi < meshes.size(); mi++) {
         const MeshData& m = meshes[mi];
+        
+        // Find or create material
+        int matIdx = -1;
+        for (int i = 0; i < (int)materials.size(); i++) {
+            if (materials[i].texID == m.textureAssetID && 
+                materials[i].r == m.tint[0] && 
+                materials[i].g == m.tint[1] && 
+                materials[i].b == m.tint[2]) {
+                matIdx = i;
+                break;
+            }
+        }
+
+        if (matIdx == -1) {
+            matIdx = (int)materials.size();
+            GltfMat newMat;
+            newMat.texID = m.textureAssetID;
+            newMat.r = m.tint[0];
+            newMat.g = m.tint[1];
+            newMat.b = m.tint[2];
+
+            if (m.textureAssetID != 0 && !m.ddsTexture.empty()) {
+                std::string texName = ToHexID(m.textureAssetID);
+                newMat.pngUri = texName + ".png";
+                std::string dp = outputDir + "/" + newMat.pngUri;
+                if (!fs::exists(dp)) {
+                    DdsToPngFile(m.ddsTexture, dp);
+                }
+            }
+            materials.push_back(newMat);
+        }
+        meshToMat[mi] = matIdx;
+
+        // Geometry stuff
         MGltf g;
         if (!m.vertices.empty()) {
             float mn[3]={m.vertices[0].x,m.vertices[0].y,m.vertices[0].z};
@@ -367,27 +445,33 @@ static void ExportMeshesToGLB(
         if (!m.normals.empty()&&m.normals.size()==m.vertices.size())
             g.nrm = addAcc(addBV(m.normals.data(),m.normals.size()*12,34962),(uint32_t)m.normals.size(),5126,"VEC3");
         mgltf.push_back(g);
+    }
 
-        if (!m.ddsTexture.empty()) {
-            std::string texName = ToHexID(m.textureAssetID);
-            std::string pngName = texName + ".png";
-            std::string dp = outputDir + "/" + pngName;
+    // Assign texture indices to materials that have images
+    struct GltfTex { int sourceIndex; };
+    std::vector<GltfTex> gltfTextures;
+    struct GltfImg { std::string uri; };
+    std::vector<GltfImg> gltfImages;
 
-            bool ok = fs::exists(dp);
-            if (!ok) {
-                ok = DdsToPngFile(m.ddsTexture, dp);
+    for (auto& mat : materials) {
+        if (!mat.pngUri.empty()) {
+            int imgIdx = -1;
+            for (int i = 0; i < (int)gltfImages.size(); i++) {
+                if (gltfImages[i].uri == mat.pngUri) { imgIdx = i; break; }
             }
-
-            if (ok) {
-                meshToMat[mi] = (int)gltfMats.size();
-                gltfMats.push_back({texName, pngName});
+            if (imgIdx == -1) {
+                imgIdx = (int)gltfImages.size();
+                gltfImages.push_back({mat.pngUri});
             }
+            
+            mat.texIndex = (int)gltfTextures.size();
+            gltfTextures.push_back({imgIdx});
         }
     }
 
     // Build GLTF JSON
     std::ostringstream js;
-    js << "{\"asset\":{\"version\":\"2.0\",\"generator\":\"HoExtractor\"},\"scene\":0,";
+    js << "{\"asset\":{\"version\":\"2.0\",\"generator\":\"Stewart\"},\"scene\":0,";
     js << "\"scenes\":[{\"nodes\":[";
     for (size_t i=0;i<meshes.size();i++){if(i)js<<",";js<<i;}
     js << "]}],\"nodes\":[";
@@ -398,7 +482,7 @@ static void ExportMeshesToGLB(
         js<<"{\"mesh\":"<<i<<",\"name\":\""<<n<<"\"}";
     }
     js << "],\"meshes\":[";
-    for (size_t mi=0;mi<meshes.size();mi++){
+    for (size_t mi=0; mi<meshes.size(); mi++){
         if(mi)js<<",";
         const MGltf& g=mgltf[mi];
         js<<"{\"primitives\":[{\"attributes\":{";
@@ -412,19 +496,25 @@ static void ExportMeshesToGLB(
         js<<"}]}";
     }
     js << "],\"materials\":[";
-    for (size_t i=0; i<gltfMats.size(); i++) {
+    for (size_t i=0; i<materials.size(); i++) {
         if(i)js<<",";
-        js<<"{\"name\":\""<<gltfMats[i].name<<"\",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":"<<i<<"},\"metallicFactor\":0.0,\"roughnessFactor\":1.0}}";
+        auto& mat = materials[i];
+        js<<"{\"name\":\"mat_"<<i<<"\",\"pbrMetallicRoughness\":{";
+        js<<"\"baseColorFactor\":["<<mat.r<<","<<mat.g<<","<<mat.b<<",1.0],";
+        if (mat.texIndex >= 0) {
+            js<<"\"baseColorTexture\":{\"index\":"<<mat.texIndex<<"},";
+        }
+        js<<"\"metallicFactor\":0.0,\"roughnessFactor\":1.0}}";
     }
     js << "],\"textures\":[";
-    for (size_t i=0; i<gltfMats.size(); i++) {
+    for (size_t i=0; i<gltfTextures.size(); i++) {
         if(i)js<<",";
-        js<<"{\"source\":"<<i<<"}";
+        js<<"{\"source\":"<<gltfTextures[i].sourceIndex<<"}";
     }
     js << "],\"images\":[";
-    for (size_t i=0; i<gltfMats.size(); i++) {
+    for (size_t i=0; i<gltfImages.size(); i++) {
         if(i)js<<",";
-        js<<"{\"uri\":\""<<gltfMats[i].pngUri<<"\"}";
+        js<<"{\"uri\":\""<<gltfImages[i].uri<<"\"}";
     }
     js<<"],\"bufferViews\":[";
     for(size_t i=0;i<bviews.size();i++){

@@ -23,6 +23,8 @@ struct GpuMesh {
     uint32_t vao = 0, vbo = 0, ebo = 0;
     uint32_t textureId = 0;
     uint32_t indexCount = 0;
+    bool hasValidTexture = false;
+    glm::vec3 tint = {1.0f, 1.0f, 1.0f};
     std::string name;
 };
 
@@ -49,6 +51,7 @@ public:
     void HandleInput(float deltaTime);
 
     bool showShadows = false;
+    bool showOnlyTextured = false;
     Camera& GetCamera() { return camera; }
 
 private:

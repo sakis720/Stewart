@@ -38,6 +38,7 @@ typedef void (APIENTRY * PFNGLUSEPROGRAMPROC) (uint32_t program);
 typedef int (APIENTRY * PFNGLGETUNIFORMLOCATIONPROC) (uint32_t program, const char *name);
 typedef void (APIENTRY * PFNGLUNIFORMMATRIX4FVPROC) (int location, GLsizei count, GLboolean transpose, const float *value);
 typedef void (APIENTRY * PFNGLUNIFORM1IPROC) (int location, int v0);
+typedef void (APIENTRY * PFNGLUNIFORM3FVPROC) (int location, GLsizei count, const float *value);
 typedef void (APIENTRY * PFNGLGENFRAMEBUFFERSPROC) (GLsizei n, uint32_t *framebuffers);
 typedef void (APIENTRY * PFNGLBINDFRAMEBUFFERPROC) (GLenum target, uint32_t framebuffer);
 typedef void (APIENTRY * PFNGLFRAMEBUFFERTEXTURE2DPROC) (GLenum target, GLenum attachment, GLenum textarget, uint32_t texture, int level);
@@ -80,6 +81,7 @@ void* glP_Get(const char* name);
 #define glGetUniformLocation ((PFNGLGETUNIFORMLOCATIONPROC) glP_Get("glGetUniformLocation"))
 #define glUniformMatrix4fv   ((PFNGLUNIFORMMATRIX4FVPROC)   glP_Get("glUniformMatrix4fv"))
 #define glUniform1i          ((PFNGLUNIFORM1IPROC)          glP_Get("glUniform1i"))
+#define glUniform3fv         ((PFNGLUNIFORM3FVPROC)         glP_Get("glUniform3fv"))
 #define glGenFramebuffers    ((PFNGLGENFRAMEBUFFERSPROC)    glP_Get("glGenFramebuffers"))
 #define glBindFramebuffer    ((PFNGLBINDFRAMEBUFFERPROC)    glP_Get("glBindFramebuffer"))
 #define glFramebufferTexture2D ((PFNGLFRAMEBUFFERTEXTURE2DPROC) glP_Get("glFramebufferTexture2D"))

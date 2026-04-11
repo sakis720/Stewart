@@ -29,6 +29,8 @@ struct MeshData {
     std::vector<Vec3>    normals;     // decoded from signed short
     std::vector<uint8_t> ddsTexture; // raw DDS bytes (may be empty)
     uint64_t             textureAssetID = 0;
+    bool                 hasValidTexture = false;
+    float                tint[3] = {1.0f, 1.0f, 1.0f}; // RGB color multiplier
     std::string          name;
 };
 

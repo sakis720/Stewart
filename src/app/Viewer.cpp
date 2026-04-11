@@ -44,11 +44,12 @@ MapViewer::MapViewer() {
         "in vec2 vUv; in vec3 vNrm;\n"
         "out vec4 color;\n"
         "uniform sampler2D tex; uniform bool hasTex;\n"
+        "uniform vec3 tint;\n"
         "void main() {\n"
         "  vec3 light = normalize(vec3(0.5, 1.0, 0.3));\n"
         "  float d = max(dot(normalize(vNrm), light), 0.3);\n"
-        "  if(hasTex) color = texture(tex, vUv) * d;\n"
-        "  else color = vec4(0.7, 0.7, 0.7, 1.0) * d;\n"
+        "  if(hasTex) color = texture(tex, vUv) * vec4(tint, 1.0) * d;\n"
+        "  else color = vec4(tint * 0.7, 1.0) * d;\n"
         "}";
 
     auto compile = [](GLenum type, const char* src) {
@@ -107,6 +108,8 @@ void MapViewer::LoadMeshes(const std::map<std::string, std::vector<MapExporter::
             GpuMesh gm;
             gm.name = m.name;
             gm.indexCount = (uint32_t)m.faces.size() * 3;
+            gm.hasValidTexture = m.hasValidTexture;
+            gm.tint = { m.tint[0], m.tint[1], m.tint[2] };
 
             struct Vert { glm::vec3 p; glm::vec2 u; glm::vec3 n; };
             std::vector<Vert> verts(m.vertices.size());
@@ -149,6 +152,7 @@ void MapViewer::Render(int width, int height, const std::map<std::string, bool>&
     
     int mvpLoc = glGetUniformLocation(shaderProgram, "mvp");
     int hasTexLoc = glGetUniformLocation(shaderProgram, "hasTex");
+    int tintLoc = glGetUniformLocation(shaderProgram, "tint");
 
     glEnable(GL_DEPTH_TEST);
     for (auto& gp : gpuGroups) {
@@ -156,6 +160,8 @@ void MapViewer::Render(int width, int height, const std::map<std::string, bool>&
         if (it != groupVisibility.end() && !it->second) continue;
 
         for (auto& m : gp.second) {
+            if (showOnlyTextured && !m.hasValidTexture) continue;
+
             if (!showShadows) {
                 // Skip meshes with "Shadow" or "ShadowCaster" in name (case-insensitive-ish)
                 std::string lower = m.name;
@@ -174,6 +180,7 @@ void MapViewer::Render(int width, int height, const std::map<std::string, bool>&
                 glUniform1i(hasTexLoc, 0);
             }
 
+            glUniform3fv(tintLoc, 1, &m.tint[0]);
             glBindVertexArray(m.vao);
             glDrawElements(GL_TRIANGLES, m.indexCount, GL_UNSIGNED_SHORT, 0);
         }

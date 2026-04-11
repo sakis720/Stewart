@@ -99,6 +99,8 @@ int main(int, char**) {
         std::vector<std::shared_ptr<HoLib::Archive>> all;
         for(auto& ai : archiveInfos) all.push_back(ai.arch);
 
+        std::map<std::string, int> nameCounts;
+
         auto& target = archiveInfos[idx];
         for (auto& asset : target.arch->Assets) {
             if (asset.AssetType == 0x86EF2978 || asset.AssetType == 0xDE180D0E) {
@@ -106,6 +108,20 @@ int main(int, char**) {
                 for(auto& c: nameUpper) c = toupper(c);
                 if (nameUpper.find("BSP_") != std::string::npos) {
                     MapExporter::MeshData mesh;
+                    // Provide a cleaner name to ParseStaticGeometry for logging
+                    std::string baseName = MapExporter::ObjectNameFromName(asset.Name);
+                    auto dot = baseName.find('.');
+                    if (dot != std::string::npos) baseName = baseName.substr(0, dot);
+                    
+                    int count = nameCounts[baseName]++;
+                    if (count > 0) {
+                        char buf[16];
+                        snprintf(buf, sizeof(buf), ".%03d", count);
+                        mesh.name = baseName + buf;
+                    } else {
+                        mesh.name = baseName;
+                    }
+
                     if (MapExporter::ParseStaticGeometry(all, *target.arch, asset, mesh, dummyLog)) {
                         std::string grp = MapExporter::GroupKeyFromName(asset.Name);
                         mapGroups[grp].push_back(std::move(mesh));
@@ -185,20 +201,25 @@ int main(int, char**) {
                     auto p = pfd::save_file("Export Map to GLB", "map.glb", { "GLB Files", "*.glb" }).result();
                     if (!p.empty()) {
                         auto filteredGroups = mapGroups;
-                        // Filter by visibility AND shadows
+                        // Filter by visibility AND shadows AND texture validity
                         for (auto it = filteredGroups.begin(); it != filteredGroups.end(); ) {
                             if (!groupVisibility[it->first]) {
                                 it = filteredGroups.erase(it);
                             } else {
-                                if (!viewer.showShadows) {
-                                    auto& meshes = it->second;
-                                    meshes.erase(std::remove_if(meshes.begin(), meshes.end(), [](const MapExporter::MeshData& m) {
+                                auto& meshes = it->second;
+                                meshes.erase(std::remove_if(meshes.begin(), meshes.end(), [&](const MapExporter::MeshData& m) {
+                                    if (viewer.showOnlyTextured && !m.hasValidTexture) return true;
+                                    
+                                    if (!viewer.showShadows) {
                                         std::string lower = m.name;
                                         for(auto& c : lower) c = (char)tolower(c);
                                         return lower.find("shadow") != std::string::npos;
-                                    }), meshes.end());
-                                }
-                                ++it;
+                                    }
+                                    return false;
+                                }), meshes.end());
+                                
+                                if (meshes.empty()) it = filteredGroups.erase(it);
+                                else ++it;
                             }
                         }
                         if (MapExporter::WriteGroupGLB(p, filteredGroups, statusMsg)) {
@@ -212,6 +233,7 @@ int main(int, char**) {
             }
             if (ImGui::BeginMenu("Options")) {
                 ImGui::MenuItem("Show Shadows", NULL, &viewer.showShadows);
+                ImGui::MenuItem("Show Only Textured", NULL, &viewer.showOnlyTextured);
                 ImGui::MenuItem("Enable Logging", NULL, &enableLogging);
                 ImGui::EndMenu();
             }
@@ -275,7 +297,6 @@ int main(int, char**) {
             
             ImGui::BeginChild("GroupsScroll", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
             for (auto& pair : groupVisibility) {
-                // Skip showing Shadow/ShadowCast groups in the sidebar as they are handled by the global toggle
                 std::string lower = pair.first;
                 for (auto& c : lower) c = (char)tolower(c);
                 if (lower.find("shadow") != std::string::npos || lower.find("shadowcast") != std::string::npos) {
