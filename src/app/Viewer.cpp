@@ -140,7 +140,7 @@ void MapViewer::LoadMeshes(const std::map<std::string, std::vector<MapExporter::
     }
 }
 
-void MapViewer::Render(int width, int height) {
+void MapViewer::Render(int width, int height, const std::map<std::string, bool>& groupVisibility) {
     if (width <= 0 || height <= 0) return;
     
     glUseProgram(shaderProgram);
@@ -152,6 +152,9 @@ void MapViewer::Render(int width, int height) {
 
     glEnable(GL_DEPTH_TEST);
     for (auto& gp : gpuGroups) {
+        auto it = groupVisibility.find(gp.first);
+        if (it != groupVisibility.end() && !it->second) continue;
+
         for (auto& m : gp.second) {
             if (!showShadows) {
                 // Skip meshes with "Shadow" or "ShadowCaster" in name (case-insensitive-ish)

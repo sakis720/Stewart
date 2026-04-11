@@ -104,11 +104,29 @@ static std::string BaseName(const std::string& name)
 // Given BSP_AMXX_AlwaysOn.8A3EB7... return "AMXX" (the group key).
 // Splits by '_', skips first segment ("BSP"), returns second.
 // Falls back to "default" if the name doesn't have enough segments.
+// Given BSP_CHXX_BSP_CityHall.E27156324363E94D return "CityHall".
+// It looks for segment after "_BSP_" or falls back to segments after "BSP_CODE_".
 std::string GroupKeyFromName(const std::string& assetName)
 {
     std::string base = BaseName(assetName);
+    
+    // Look for "_BSP_"
+    size_t pos = base.find("_BSP_");
+    if (pos != std::string::npos) {
+        std::string sub = base.substr(pos + 5); // Skip "_BSP_"
+        auto dot = sub.find('.');
+        if (dot != std::string::npos) sub = sub.substr(0, dot);
+        return sub;
+    }
+
     auto parts = SplitBy(base, '_');
-    // parts[0] should be "BSP" (case-insensitive)
+    if (parts.size() >= 3) {
+        std::string sub = parts[2];
+        auto dot = sub.find('.');
+        if (dot != std::string::npos) sub = sub.substr(0, dot);
+        return sub;
+    }
+    
     if (parts.size() >= 2) return parts[1];
     return "default";
 }

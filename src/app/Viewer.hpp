@@ -45,7 +45,7 @@ public:
     ~MapViewer();
 
     void LoadMeshes(const std::map<std::string, std::vector<MapExporter::MeshData>>& groups);
-    void Render(int width, int height);
+    void Render(int width, int height, const std::map<std::string, bool>& groupVisibility);
     void HandleInput(float deltaTime);
 
     bool showShadows = false;

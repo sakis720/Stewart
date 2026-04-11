@@ -76,6 +76,7 @@ int main(int, char**) {
     };
     std::vector<ArchiveInfo> archiveInfos;
     std::map<std::string, std::vector<MapExporter::MeshData>> mapGroups;
+    std::map<std::string, bool> groupVisibility;
     Viewer::MapViewer viewer;
     int selectedArchive = -1;
     
@@ -113,6 +114,9 @@ int main(int, char**) {
             }
         }
         viewer.LoadMeshes(mapGroups);
+        groupVisibility.clear();
+        for (auto const& [name, meshes] : mapGroups) groupVisibility[name] = true;
+
         statusMsg = "Loaded " + target.arch->SectionName + " (" + std::to_string(mapGroups.size()) + " groups)";
     };
 
@@ -181,14 +185,20 @@ int main(int, char**) {
                     auto p = pfd::save_file("Export Map to GLB", "map.glb", { "GLB Files", "*.glb" }).result();
                     if (!p.empty()) {
                         auto filteredGroups = mapGroups;
-                        if (!viewer.showShadows) {
-                            for (auto& gp : filteredGroups) {
-                                auto& meshes = gp.second;
-                                meshes.erase(std::remove_if(meshes.begin(), meshes.end(), [](const MapExporter::MeshData& m) {
-                                    std::string lower = m.name;
-                                    for(auto& c : lower) c = (char)tolower(c);
-                                    return lower.find("shadow") != std::string::npos;
-                                }), meshes.end());
+                        // Filter by visibility AND shadows
+                        for (auto it = filteredGroups.begin(); it != filteredGroups.end(); ) {
+                            if (!groupVisibility[it->first]) {
+                                it = filteredGroups.erase(it);
+                            } else {
+                                if (!viewer.showShadows) {
+                                    auto& meshes = it->second;
+                                    meshes.erase(std::remove_if(meshes.begin(), meshes.end(), [](const MapExporter::MeshData& m) {
+                                        std::string lower = m.name;
+                                        for(auto& c : lower) c = (char)tolower(c);
+                                        return lower.find("shadow") != std::string::npos;
+                                    }), meshes.end());
+                                }
+                                ++it;
                             }
                         }
                         if (MapExporter::WriteGroupGLB(p, filteredGroups, statusMsg)) {
@@ -231,10 +241,14 @@ int main(int, char**) {
 
         // Left Sidebar: Archives & Groups
         ImGui::BeginChild("Sidebar", ImVec2(300, 0), true);
+        
+        float availH = ImGui::GetContentRegionAvail().y;
 
+        // --- Archives Section (Top) ---
         ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Archives in Folder:");
         ImGui::Separator();
         
+        ImGui::BeginChild("ArchivesScroll", ImVec2(0, availH * 0.45f), false);
         for (int i = 0; i < (int)archiveInfos.size(); ++i) {
             std::string label = archiveInfos[i].arch->SectionName;
             if (ImGui::Selectable(label.c_str(), selectedArchive == i)) {
@@ -242,20 +256,38 @@ int main(int, char**) {
                 loadSelectedMap(i);
             }
         }
+        ImGui::EndChild();
 
-        if (selectedArchive != -1) {
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Map Groups:");
-            for (auto const& [name, meshes] : mapGroups) {
-                if (ImGui::TreeNode(name.c_str())) {
-                    for (auto& m : meshes) {
-                        ImGui::BulletText("%s", MapExporter::ObjectNameFromName(m.name).c_str());
-                    }
-                    ImGui::TreePop();
-                }
+        ImGui::Spacing();
+        ImGui::Separator();
+        
+        // --- Map Groups Section (Bottom) ---
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Map Groups:");
+        
+        if (!mapGroups.empty()) {
+            if (ImGui::Button("Select All", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 0))) {
+                for (auto& pair : groupVisibility) pair.second = true;
             }
+            ImGui::SameLine();
+            if (ImGui::Button("Deselect", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+                for (auto& pair : groupVisibility) pair.second = false;
+            }
+            
+            ImGui::BeginChild("GroupsScroll", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+            for (auto& pair : groupVisibility) {
+                // Skip showing Shadow/ShadowCast groups in the sidebar as they are handled by the global toggle
+                std::string lower = pair.first;
+                for (auto& c : lower) c = (char)tolower(c);
+                if (lower.find("shadow") != std::string::npos || lower.find("shadowcast") != std::string::npos) {
+                    continue;
+                }
+                ImGui::Checkbox(pair.first.c_str(), &pair.second);
+            }
+            ImGui::EndChild();
+        } else {
+            ImGui::TextDisabled("Load a map to see groups");
         }
+        
         ImGui::EndChild();
         ImGui::SameLine();
 
@@ -300,7 +332,7 @@ int main(int, char**) {
                 viewer.HandleInput(deltaTime);
             }
 
-            viewer.Render(vw, vh);
+            viewer.Render(vw, vh, groupVisibility);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
             ImGui::Image((void*)(intptr_t)viewportTex, size, ImVec2(0, 1), ImVec2(1, 0));
