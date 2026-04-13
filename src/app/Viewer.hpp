@@ -52,6 +52,8 @@ public:
 
     bool showShadows = false;
     bool showOnlyTextured = false;
+    bool isFlyMode = false;
+    float movementSpeed = 50.0f;
     Camera& GetCamera() { return camera; }
 
 private:

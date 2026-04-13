@@ -13,10 +13,6 @@ namespace MapExporter {
 
 namespace fs = std::filesystem;
 
-// ============================================================================
-//  Low-level helpers
-// ============================================================================
-
 static std::vector<uint8_t> ReadAssetBytes(
     const HoLib::Archive&    archive,
     const HoLib::AssetEntry& asset)
@@ -25,17 +21,16 @@ static std::vector<uint8_t> ReadAssetBytes(
     return asset.ReadData(reader);
 }
 
-// Find RawBlob / GEN_RawBlob by AssetID
+// Locate a RawBlob or GEN_RawBlob asset by its unique ID
 static const HoLib::AssetEntry* FindRawBlobByID(
     const std::vector<std::shared_ptr<HoLib::Archive>>& archives,
     uint64_t targetID,
     const HoLib::Archive** outArchive = nullptr)
 {
-    static const uint32_t RAWBLOB_TYPE     = 0xBDE21A8D;
-    static const uint32_t GEN_RAWBLOB_TYPE = 0x4DB6973E;
     for (const auto& arch : archives)
         for (const auto& asset : arch->Assets)
-            if ((asset.AssetType == RAWBLOB_TYPE || asset.AssetType == GEN_RAWBLOB_TYPE)
+            if ((asset.AssetType == (uint32_t)HoLib::AssetType::RawBlob || 
+                 asset.AssetType == (uint32_t)HoLib::AssetType::GEN_RawBlob)
                 && asset.AssetID == targetID)
             {
                 if (outArchive) *outArchive = arch.get();
@@ -60,9 +55,7 @@ static const HoLib::AssetEntry* FindAssetByIDAndType(
     return nullptr;
 }
 
-// Read 8 bytes at offset as little-endian uint64 (i.e. "reversed" per spec).
-// Spec example: bytes C7 10 CA D7 91 A3 D5 9B  →  reversed value 9BD5A391D7CA10C7
-// i.e. byte[0] is the LSB of the result.
+// Reads a 64-bit address/ID from a buffer in little-endian format
 static uint64_t ReadAddressLE(const std::vector<uint8_t>& buf, size_t offset)
 {
     if (offset + 8 > buf.size()) return 0;
@@ -101,19 +94,15 @@ static std::string BaseName(const std::string& name)
     return s;
 }
 
-// Given BSP_AMXX_AlwaysOn.8A3EB7... return "AMXX" (the group key).
-// Splits by '_', skips first segment ("BSP"), returns second.
-// Falls back to "default" if the name doesn't have enough segments.
-// Given BSP_CHXX_BSP_CityHall.E27156324363E94D return "CityHall".
-// It looks for segment after "_BSP_" or falls back to segments after "BSP_CODE_".
+// Extracts the group key from an asset name by parsing segments
 std::string GroupKeyFromName(const std::string& assetName)
 {
     std::string base = BaseName(assetName);
     
-    // Look for "_BSP_"
+    // Check for BSP naming convention
     size_t pos = base.find("_BSP_");
     if (pos != std::string::npos) {
-        std::string sub = base.substr(pos + 5); // Skip "_BSP_"
+        std::string sub = base.substr(pos + 5);
         auto dot = sub.find('.');
         if (dot != std::string::npos) sub = sub.substr(0, dot);
         return sub;
@@ -154,12 +143,14 @@ static bool UVUsePadding4(const std::vector<uint8_t>& buf) {
     uint8_t b4=buf[4], b5=buf[5], b6=buf[6], b7=buf[7];
     return (b4==0x33 && b5==0x33 && b6==0x33 && b7==0xFF)
         || (b4==0xFF && b5==0xFF && b6==0xFF && b7==0xFF)
-        || (b4==0x00 && b5==0x00 && b6==0x00 && b7==0x40);
+        || (b4==0x00 && b5==0x00 && b6==0x00 && b7==0x40)
+        || (b4==0x00 && b5==0x00 && b6==0x00 && b7==0x00);
 }
 
+// Determines if normals use 4-byte padding based on header signatures
 static bool NormalUsePadding4(const std::vector<uint8_t>& buf) {
     if (buf.size() < 7) return false;
-    return (buf[4]==0xFF && buf[5]==0xFF && buf[6]==0xFF);
+    return (buf[4] == 0xFF && buf[5] == 0xFF && buf[6] == 0xFF);
 }
 
 static std::vector<Vec3> ParseVertices(const std::vector<uint8_t>& buf) {
@@ -212,7 +203,7 @@ static std::vector<Vec3> ParseNormals(const std::vector<uint8_t>& buf) {
 // ============================================================================
 //  Texture chain
 // ============================================================================
-// SG[0x38] -> Material(0x189F55BF) -> [size-100] -> Texture(0x2952081F) -> [0] -> RawBlob -> DDS
+// Resolves the texture chain from StaticGeometry to a raw DDS blob
 
 static bool ResolveDDSTexture(
     const std::vector<std::shared_ptr<HoLib::Archive>>& archives,
@@ -221,8 +212,8 @@ static bool ResolveDDSTexture(
     MeshData& out,
     std::ostream& log)
 {
-    static const uint32_t MATERIAL_TYPE = 0x189F55BF;
-    static const uint32_t TEXTURE_TYPE  = 0x2952081F;
+    const uint32_t MATERIAL_TYPE = (uint32_t)HoLib::AssetType::Material;
+    const uint32_t TEXTURE_TYPE  = (uint32_t)HoLib::AssetType::Texture;
 
     if (sgData.size() < 0x40) { log << "  " << meshName << ": SG too small\n"; return false; }
 
@@ -305,7 +296,7 @@ static bool ResolveDDSTexture(
 }
 
 // ============================================================================
-//  Parse one StaticGeometry asset → MeshData
+//  StaticGeometry Parser
 // ============================================================================
 
 bool ParseStaticGeometry(
@@ -348,9 +339,10 @@ bool ParseStaticGeometry(
 }
 
 // ============================================================================
-//  GLB export  (one file per group)
+//  GLB Export
 // ============================================================================
 
+// Writes a collection of meshes to a GLB file, grouped by name
 static void ExportMeshesToGLB(
     const std::vector<MeshData>& meshes,
     const std::string& outputDir,
@@ -429,14 +421,16 @@ static void ExportMeshesToGLB(
         }
         meshToMat[mi] = matIdx;
 
-        // Geometry stuff
+        // Populate GLTF structures
         MGltf g;
         if (!m.vertices.empty()) {
-            float mn[3]={m.vertices[0].x,m.vertices[0].y,m.vertices[0].z};
-            float mx[3]={mn[0],mn[1],mn[2]};
-            for (auto& v:m.vertices){mn[0]=std::min(mn[0],v.x);mn[1]=std::min(mn[1],v.y);mn[2]=std::min(mn[2],v.z);
-                                     mx[0]=std::max(mx[0],v.x);mx[1]=std::max(mx[1],v.y);mx[2]=std::max(mx[2],v.z);}
-            g.pos = addAcc(addBV(m.vertices.data(),m.vertices.size()*12,34962),(uint32_t)m.vertices.size(),5126,"VEC3",mn,mx);
+            float mn[3] = { m.vertices[0].x, m.vertices[0].y, m.vertices[0].z };
+            float mx[3] = { mn[0], mn[1], mn[2] };
+            for (auto& v : m.vertices) {
+                mn[0] = std::min(mn[0], v.x); mn[1] = std::min(mn[1], v.y); mn[2] = std::min(mn[2], v.z);
+                mx[0] = std::max(mx[0], v.x); mx[1] = std::max(mx[1], v.y); mx[2] = std::max(mx[2], v.z);
+            }
+            g.pos = addAcc(addBV(m.vertices.data(), m.vertices.size() * 12, 34962), (uint32_t)m.vertices.size(), 5126, "VEC3", mn, mx);
         }
         if (!m.faces.empty())
             g.idx = addAcc(addBV(m.faces.data(),m.faces.size()*6,34963),(uint32_t)(m.faces.size()*3),5123,"SCALAR");

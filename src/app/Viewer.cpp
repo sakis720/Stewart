@@ -188,8 +188,17 @@ void MapViewer::Render(int width, int height, const std::map<std::string, bool>&
 }
 
 void MapViewer::HandleInput(float deltaTime) {
-    float speed = 50.0f * deltaTime;
+    ImGuiIO& io = ImGui::GetIO();
+    float speed = movementSpeed * deltaTime;
+
     if (ImGui::IsKeyDown(ImGuiKey_LeftShift)) speed *= 3.0f;
+
+    if (isFlyMode) {
+        camera.yaw += io.MouseDelta.x * 0.15f;
+        camera.pitch -= io.MouseDelta.y * 0.15f;
+        if (camera.pitch > 89.0f) camera.pitch = 89.0f;
+        if (camera.pitch < -89.0f) camera.pitch = -89.0f;
+    }
 
     glm::vec3 forward = glm::normalize(glm::vec3(cos(glm::radians(camera.yaw)) * cos(glm::radians(camera.pitch)), 
                                                   sin(glm::radians(camera.pitch)), 

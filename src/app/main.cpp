@@ -323,8 +323,8 @@ int main(int, char**) {
             glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             
-            // Handle Blender-style Cam
-            if (ImGui::IsWindowHovered()) {
+            bool hovered = ImGui::IsWindowHovered();
+            if (hovered && !viewer.isFlyMode) {
                 auto& cam = viewer.GetCamera();
                 
                 // MMB Orbit
@@ -353,10 +353,64 @@ int main(int, char**) {
                 viewer.HandleInput(deltaTime);
             }
 
+            // Fly Mode Hotkey (Z) or Escape to exit
+            if (ImGui::IsKeyPressed(ImGuiKey_Z) && (hovered || viewer.isFlyMode)) {
+                viewer.isFlyMode = !viewer.isFlyMode;
+                if (viewer.isFlyMode) {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                    viewer.GetCamera().orbitMode = false;
+                } else {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                }
+            }
+            if (viewer.isFlyMode && (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
+                viewer.isFlyMode = false;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            }
+
+            // Orbit Toggle (O)
+            if (ImGui::IsKeyPressed(ImGuiKey_O) && (hovered || viewer.isFlyMode)) {
+                viewer.GetCamera().orbitMode = !viewer.GetCamera().orbitMode;
+            }
+
+            // Speed Control (+/-)
+            if (ImGui::IsKeyDown(ImGuiKey_KeypadAdd)) viewer.movementSpeed += 100.0f * deltaTime;
+            if (ImGui::IsKeyDown(ImGuiKey_KeypadSubtract)) viewer.movementSpeed -= 100.0f * deltaTime;
+            if (viewer.movementSpeed < 1.0f) viewer.movementSpeed = 1.0f;
+
+            // If in Fly Mode, keep handling input even if not "hovered" by mouse (since cursor is hidden)
+            if (viewer.isFlyMode) {
+                viewer.HandleInput(deltaTime);
+            }
+
             viewer.Render(vw, vh, groupVisibility);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
             ImGui::Image((void*)(intptr_t)viewportTex, size, ImVec2(0, 1), ImVec2(1, 0));
+            
+            // On-screen Overlay
+            ImVec2 overlayPos = ImVec2(ImGui::GetItemRectMin().x + 10, ImGui::GetItemRectMin().y + 10);
+            ImGui::SetCursorScreenPos(overlayPos);
+            
+            ImGui::BeginGroup();
+            if (viewer.isFlyMode) {
+                ImGui::TextColored(ImVec4(1, 1, 0, 1), "FLY MODE ACTIVE");
+            } else {
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1), "VIEWER MODE");
+            }
+            
+            ImGui::Text("Camera: %s (Press 'O' to switch)", viewer.GetCamera().orbitMode ? "Orbit" : "Free");
+            ImGui::Text("Speed: %.1f (Keypad +/-)", viewer.movementSpeed);
+            
+            if (ImGui::IsWindowHovered() || viewer.isFlyMode) {
+                ImGui::Separator();
+                ImGui::TextDisabled("Controls:");
+                ImGui::TextDisabled("- WASD: Move");
+                ImGui::TextDisabled("- Q/E: Up/Down");
+                ImGui::TextDisabled("- Z: Toggle Fly Mode");
+                ImGui::TextDisabled("- Shift: Sprint");
+            }
+            ImGui::EndGroup();
         }
         ImGui::EndChild();
 
