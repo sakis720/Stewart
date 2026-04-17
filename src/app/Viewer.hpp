@@ -15,7 +15,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include "glad.h"
-#include "MapExporter.hpp"
+#include "GeometryCommon.hpp"
 
 namespace Viewer {
 
@@ -26,6 +26,7 @@ struct GpuMesh {
     bool hasValidTexture = false;
     glm::vec3 tint = {1.0f, 1.0f, 1.0f};
     std::string name;
+    bool isSupported = true;
 };
 
 struct Camera {
@@ -46,8 +47,8 @@ public:
     MapViewer();
     ~MapViewer();
 
-    void LoadMeshes(const std::map<std::string, std::vector<MapExporter::MeshData>>& groups);
-    void Render(int width, int height, const std::map<std::string, bool>& groupVisibility);
+    void LoadMeshes(const std::map<std::string, std::vector<GeometryCommon::MeshData>>& groups);
+    void Render(int width, int height, const std::map<std::string, bool>& groupVisibility, const std::map<std::string, bool>& meshVisibility = {});
     void HandleInput(float deltaTime);
 
     bool showShadows = false;
@@ -56,7 +57,7 @@ public:
     float movementSpeed = 50.0f;
     Camera& GetCamera() { return camera; }
 
-private:
+protected:
     void Clear();
     uint32_t LoadTexture(const std::vector<uint8_t>& ddsData);
 

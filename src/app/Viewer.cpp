@@ -101,7 +101,7 @@ uint32_t MapViewer::LoadTexture(const std::vector<uint8_t>& ddsData) {
     return tid;
 }
 
-void MapViewer::LoadMeshes(const std::map<std::string, std::vector<MapExporter::MeshData>>& groups) {
+void MapViewer::LoadMeshes(const std::map<std::string, std::vector<GeometryCommon::MeshData>>& groups) {
     Clear();
     for (auto& g : groups) {
         for (auto& m : g.second) {
@@ -110,6 +110,7 @@ void MapViewer::LoadMeshes(const std::map<std::string, std::vector<MapExporter::
             gm.indexCount = (uint32_t)m.faces.size() * 3;
             gm.hasValidTexture = m.hasValidTexture;
             gm.tint = { m.tint[0], m.tint[1], m.tint[2] };
+            gm.isSupported = m.isSupported;
 
             struct Vert { glm::vec3 p; glm::vec2 u; glm::vec3 n; };
             std::vector<Vert> verts(m.vertices.size());
@@ -143,7 +144,7 @@ void MapViewer::LoadMeshes(const std::map<std::string, std::vector<MapExporter::
     }
 }
 
-void MapViewer::Render(int width, int height, const std::map<std::string, bool>& groupVisibility) {
+void MapViewer::Render(int width, int height, const std::map<std::string, bool>& groupVisibility, const std::map<std::string, bool>& meshVisibility) {
     if (width <= 0 || height <= 0) return;
     
     glUseProgram(shaderProgram);
@@ -160,7 +161,11 @@ void MapViewer::Render(int width, int height, const std::map<std::string, bool>&
         if (it != groupVisibility.end() && !it->second) continue;
 
         for (auto& m : gp.second) {
+            if (!m.isSupported) continue;
             if (showOnlyTextured && !m.hasValidTexture) continue;
+
+            auto vit = meshVisibility.find(m.name);
+            if (vit != meshVisibility.end() && !vit->second) continue;
 
             if (!showShadows) {
                 // Skip meshes with "Shadow" or "ShadowCaster" in name (case-insensitive-ish)
@@ -227,3 +232,5 @@ void MapViewer::HandleInput(float deltaTime) {
 }
 
 } // namespace Viewer
+   
+ 

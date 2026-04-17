@@ -9,13 +9,14 @@
  */
 #pragma once
 #include "GeometryCommon.hpp"
-#include <map>
 
-namespace MapExporter {
+namespace SkeletalExporter {
 
-bool WriteGroupGLB(
-    const std::string& outputPath,
-    const std::map<std::string, std::vector<GeometryCommon::MeshData>>& groups,
-    std::string& statusOut);
+bool ParseSkinGeometry(
+    const std::vector<std::shared_ptr<HoLib::Archive>>& archives,
+    const HoLib::Archive& arch,
+    const HoLib::AssetEntry& skinAsset,
+    GeometryCommon::MeshData& out,
+    std::ostream& log);
 
-} // namespace MapExporter
+} // namespace SkeletalExporter

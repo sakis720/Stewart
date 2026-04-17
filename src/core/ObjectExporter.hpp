@@ -9,13 +9,17 @@
  */
 #pragma once
 #include "GeometryCommon.hpp"
-#include <map>
 
-namespace MapExporter {
+namespace ObjectExporter {
 
-bool WriteGroupGLB(
-    const std::string& outputPath,
-    const std::map<std::string, std::vector<GeometryCommon::MeshData>>& groups,
-    std::string& statusOut);
+bool ParseStaticGeometry(
+    const std::vector<std::shared_ptr<HoLib::Archive>>& archives,
+    const HoLib::Archive& arch,
+    const HoLib::AssetEntry& sgAsset,
+    GeometryCommon::MeshData& out,
+    std::ostream& log);
 
-} // namespace MapExporter
+std::string GroupKeyFromName(const std::string& assetName);
+std::string ObjectNameFromName(const std::string& assetName);
+
+} // namespace ObjectExporter
